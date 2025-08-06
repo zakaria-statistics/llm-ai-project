@@ -47,7 +47,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
             docker load -i ~/backend.tar
-            cd /var/www/simple-ai-agent
+            cd ~/llm-ai-project/simple-ai-agent
             export BACKEND_IMAGE_TAG=${{ github.sha }}
             docker compose up -d --no-deps --build agent
             rm -rf ~/backend.tar

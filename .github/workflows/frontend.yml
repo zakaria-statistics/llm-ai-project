@@ -25,9 +25,6 @@ jobs:
       - name: Save Docker image as tar
         run: docker save simple-ai-agent-frontend:${{ github.sha }} -o frontend.tar
 
-      - name: Move tar to repo root
-        run: mv frontend.tar $GITHUB_WORKSPACE/frontend.tar
-
       - name: Set permissions for frontend.tar
         run: chmod 644 $GITHUB_WORKSPACE/frontend.tar
 
@@ -51,6 +48,9 @@ jobs:
           script: |
             docker load -i ~/frontend.tar
             cd /var/www/simple-ai-agent
+            export FRONTEND_IMAGE_TAG=${{ github.sha }}
+            docker compose up -d --no-deps --build frontend
+            rm -rf ~/frontend.tar
             export FRONTEND_IMAGE_TAG=${{ github.sha }}
             docker compose up -d --no-deps --build frontend
             rm -rf ~/frontend.tar

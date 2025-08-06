@@ -30,20 +30,29 @@ def file_tool(action: str, filename: str = "", content: str = "") -> str:
     path = os.path.abspath(os.path.join(SAFE_DIR, filename))
     if not path.startswith(os.path.abspath(SAFE_DIR)):
         return "Access denied: Unsafe file path."
+
     try:
         if action == "list":
             return "\n".join(os.listdir(SAFE_DIR))
+
         elif action == "read":
-            with open(path, "r") as f:
+            if not os.path.exists(path):
+                return f"File not found: {filename}"
+            with open(path, "r", encoding="utf-8") as f:
                 return f.read()
+
         elif action == "write":
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
             return f"Written to {filename}"
+
         else:
             return "Invalid action. Use 'list', 'read', or 'write'."
+
     except Exception as e:
-        return f"File error: {str(e)}"
+        # Retourne juste le message brut
+        return str(e)
+
 
 def file_exploit_tool(input: str) -> str:
     """

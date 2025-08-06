@@ -46,7 +46,6 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            docker load -i ~/backend.tar
+            docker load -i ~/backend.tar/backend.tar
             cd ~/llm-ai-project/simple-ai-agent
             docker compose up -d --no-deps --build agent
-            rm -rf ~/backend.tar

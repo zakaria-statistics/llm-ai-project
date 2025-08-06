@@ -1,0 +1,54 @@
+name: Backend CI/CD
+
+on:
+  push:
+    paths:
+      - "agent/**"
+      - ".github/workflows/backend.yml"
+      - "docker-compose.yml"
+  pull_request:
+    paths:
+      - "agent/**"
+      - ".github/workflows/backend.yml"
+      - "docker-compose.yml"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: docker build -t simple-ai-agent-backend:${{ github.sha }} ./agent
+
+      - name: Save Docker image as tar
+        run: docker save simple-ai-agent-backend:${{ github.sha }} -o backend.tar
+
+      - name: Move tar to repo root
+        run: mv backend.tar $GITHUB_WORKSPACE/backend.tar
+
+      - name: Set permissions for backend.tar
+        run: chmod 644 $GITHUB_WORKSPACE/backend.tar
+
+      - name: Copy image to VM
+        uses: appleboy/scp-action@v0.1.6
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: backend.tar
+          target: ~/backend.tar
+
+      - name: Load image and deploy via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            docker load -i ~/backend.tar
+            cd /var/www/simple-ai-agent
+            export BACKEND_IMAGE_TAG=${{ github.sha }}
+            docker compose up -d --no-deps --build agent
+            rm -rf ~/backend.tar

@@ -1,0 +1,54 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+      - "docker-compose.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+      - "docker-compose.yml"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: docker build -t simple-ai-agent-frontend:${{ github.sha }} ./frontend
+
+      - name: Save Docker image as tar
+        run: docker save simple-ai-agent-frontend:${{ github.sha }} -o frontend.tar
+
+      - name: Move tar to repo root
+        run: mv frontend.tar $GITHUB_WORKSPACE/frontend.tar
+
+      - name: Set permissions for frontend.tar
+        run: chmod 644 $GITHUB_WORKSPACE/frontend.tar
+
+      - name: Copy image to VM
+        uses: appleboy/scp-action@v0.1.6
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: frontend.tar
+          target: ~/frontend.tar
+
+      - name: Load image and deploy via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            docker load -i ~/frontend.tar
+            cd /var/www/simple-ai-agent
+            export FRONTEND_IMAGE_TAG=${{ github.sha }}
+            docker compose up -d --no-deps --build frontend
+            rm -rf ~/frontend.tar

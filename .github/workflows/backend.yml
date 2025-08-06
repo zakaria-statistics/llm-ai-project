@@ -20,10 +20,10 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build Docker image
-        run: docker build -t simple-ai-agent-backend:${{ github.sha }} ./agent
+        run: docker build -t agent-backend:1.0.0 ./agent
 
       - name: Save Docker image as tar
-        run: docker save simple-ai-agent-backend:${{ github.sha }} -o backend.tar
+        run: docker save agent-backend:1.0.0 -o backend.tar
 
       - name: Set permissions for backend.tar
         run: chmod 644 $GITHUB_WORKSPACE/backend.tar
@@ -48,9 +48,5 @@ jobs:
           script: |
             docker load -i ~/backend.tar
             cd ~/llm-ai-project/simple-ai-agent
-            export BACKEND_IMAGE_TAG=${{ github.sha }}
-            docker compose up -d --no-deps --build agent
-            rm -rf ~/backend.tar
-            export BACKEND_IMAGE_TAG=${{ github.sha }}
             docker compose up -d --no-deps --build agent
             rm -rf ~/backend.tar

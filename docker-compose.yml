@@ -20,7 +20,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
 
   agent:
-    build: ./agent
+    image: agent-backend:1.0.0
     container_name: local-agent
     ports:
       - "8000:8000"
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    image: agent-frontend:1.0.0
     container_name: agent-frontend
     ports:
       - "3003:80"

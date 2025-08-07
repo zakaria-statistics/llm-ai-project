@@ -11,7 +11,7 @@ function App() {
     setError('');
     setResponse('');
     try {
-      const res = await fetch("http://196.115.239.9:8000/ask", {
+      const res = await fetch("http://196.115.82.158:8000/ask", {
         method: "POST",
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt })

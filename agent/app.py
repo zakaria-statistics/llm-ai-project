@@ -86,7 +86,14 @@ tools = [
 
 ]
 
-agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True, handle_parsing_errors=True)
+agent = initialize_agent(
+            tools,
+            llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=True, handle_parsing_errors=True,
+            max_iterations=10,  # Limit iterations to prevent infinite loops
+            max_execution_time=30  # Limit execution time to 30 seconds   
+        )
 
 class Prompt(BaseModel):
     prompt: str

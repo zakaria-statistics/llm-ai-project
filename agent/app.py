@@ -1,158 +1,208 @@
+# --------------------- IMPORTS ---------------------
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain.agents import initialize_agent, Tool
 from langchain_community.llms import Ollama
-from langchain_experimental.tools import PythonREPLTool  # Correct import
+from langchain_experimental.tools import PythonREPLTool
 from langchain.agents.agent_types import AgentType
-import subprocess, os
+import subprocess, os, re
+
+# ===================================================
+# ================ APP & LLM CONFIG =================
+# ===================================================
 
 app = FastAPI()
 
-# Add CORS middleware
+# CORS (ouvre à tout pour dev; restreindre en prod)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust as needed for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
-ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+llm = Ollama(model="mistral", base_url=OLLAMA_BASE_URL)
 
-llm = Ollama(model="mistral", base_url=ollama_base_url)
-
-# ----------------- Nouveaux outils avancés -----------------
-
-def summarize_file_tool(filename: str) -> str:
-    """
-    Résume le contenu texte d'un fichier dans SAFE_DIR.
-    """
-    path = os.path.abspath(os.path.join(SAFE_DIR, filename))
-    if not path.startswith(os.path.abspath(SAFE_DIR)):
-        return "Access denied: Unsafe file path."
-    if not os.path.exists(path):
-        return f"File not found: {filename}"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        prompt = f"Résume clairement et de façon structurée le texte suivant :\n\n{content}"
-        return llm.invoke(prompt)
-    except Exception as e:
-        return f"Summary error: {str(e)}"
-
-
-def question_on_file_tool(input_str: str) -> str:
-    """
-    Pose une question sur le contenu d'un fichier.
-    Usage attendu: "nom_du_fichier.txt | Ta question ici"
-    """
-    try:
-        parts = input_str.split("|", 1)
-        if len(parts) != 2:
-            return "Format invalide. Utilise: 'fichier.txt | question'"
-        filename, question = parts[0].strip(), parts[1].strip()
-        path = os.path.abspath(os.path.join(SAFE_DIR, filename))
-        if not path.startswith(os.path.abspath(SAFE_DIR)):
-            return "Access denied: Unsafe file path."
-        if not os.path.exists(path):
-            return f"File not found: {filename}"
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-        prompt = (
-            f"Voici le contenu d'un fichier :\n{content}\n\n"
-            f"En te basant uniquement sur ce texte, réponds à la question suivante : {question}"
-        )
-        return llm.invoke(prompt)
-    except Exception as e:
-        return f"Question error: {str(e)}"
-
-
-
-
-
-# --------------------- File-safe tool ---------------------
+# Dossier fichiers sécurisé (montre-le en volume: ./files:/app/files)
 SAFE_DIR = "./files"
 os.makedirs(SAFE_DIR, exist_ok=True)
 
-def file_tool(action: str, filename: str = "", content: str = "") -> str:
+# ===================================================
+# ================== HELPERS GÉNÉRIQUES =============
+# ===================================================
+
+def _strip_quotes(s: str) -> str:
+    """Nettoie quotes/backticks et espaces superflus autour d'un arg."""
+    if not isinstance(s, str):
+        return s
+    s = s.strip()
+    if (s.startswith("'") and s.endswith("'")) or \
+       (s.startswith('"') and s.endswith('"')) or \
+       (s.startswith("`") and s.endswith("`")):
+        s = s[1:-1].strip()
+    return s.strip(" '\"`")
+
+def _safe_join(filename: str) -> str:
+    """Construit un chemin sûr, strictement sous SAFE_DIR."""
+    filename = _strip_quotes(filename)  # <- nettoyage de base
     path = os.path.abspath(os.path.join(SAFE_DIR, filename))
-    if not path.startswith(os.path.abspath(SAFE_DIR)):
-        return "Access denied: Unsafe file path."
+    safe_root = os.path.abspath(SAFE_DIR)
+    if os.path.commonpath([path, safe_root]) != safe_root:
+        raise PermissionError("Access denied: Unsafe file path.")
+    return path
 
+# ===================================================
+# ================== MODULE FILE OPS =================
+# ===================================================
+
+def list_files() -> str:
+    items = sorted(os.listdir(SAFE_DIR))
+    return "\n".join(items) if items else "(empty)"
+
+def read_file(filename: str) -> str:
+    path = _safe_join(filename)
+    if not os.path.exists(path):
+        return f"File not found: {filename}"
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def write_file(filename: str, content: str = "") -> str:
+    path = _safe_join(filename)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content or "")
+    return f"Written to {filename}"
+
+# API “bas niveau” pour l’agent (list/read/write via une seule commande)
+def file_tool(action: str, filename: str = "", content: str = "") -> str:
     try:
+        action = (action or "").strip().lower()
         if action == "list":
-            return "\n".join(os.listdir(SAFE_DIR))
-
+            return list_files()
         elif action == "read":
-            if not os.path.exists(path):
-                return f"File not found: {filename}"
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
-
+            if not filename:
+                return "Missing filename."
+            return read_file(filename)
         elif action == "write":
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-            return f"Written to {filename}"
-
+            if not filename:
+                return "Missing filename."
+            return write_file(filename, content)
         else:
-            return "Invalid action. Use 'list', 'read', or 'write'."
-
+            return "Invalid action. Use 'list', 'read <file>', or 'write <file> <content>'."
+    except PermissionError as pe:
+        return str(pe)
     except Exception as e:
-        # Retourne juste le message brut
         return str(e)
 
+def file_exploit_tool(user_input: str) -> str:
+    """
+    Parse robuste d'une commande en une ligne :
+      - list
+      - read filename.txt
+      - write filename.txt contenu...
+    Tolère quotes/backticks et espaces multiples.
+    """
+    if not user_input or not user_input.strip():
+        return "No input provided."
 
-def file_exploit_tool(input: str) -> str:
-    """
-    Usage:
-    - To list files: 'list'
-    - To read a file: 'read filename.txt'
-    - To write a file: 'write filename.txt content'
-    """
-    parts = input.strip().split(" ", 2)
+    cleaned = _strip_quotes(user_input.strip())
+    parts = re.split(r"\s+", cleaned, maxsplit=2)  # split sur espaces multiples
     if not parts:
         return "No input provided."
-    action = parts[0]
-    filename = parts[1] if len(parts) > 1 else ""
-    content = parts[2] if len(parts) > 2 else ""
+
+    action = (parts[0] or "").lower()
+    filename = _strip_quotes(parts[1]) if len(parts) > 1 else ""
+    content  = parts[2] if len(parts) > 2 else ""
+
     return file_tool(action, filename, content)
 
+# ===================================================
+# =================== OUTILS “IA” ====================
+# ===================================================
+
 def shell_tool(cmd: str) -> str:
-    allowed = ["ls", "pwd", "whoami"]
-    # Only allow exact matches for safety
-    if cmd.strip().split()[0] in allowed:
+    """Shell restreint aux commandes autorisées."""
+    allowed = {"ls", "pwd", "whoami"}
+    token = (cmd or "").strip().split()[0] if cmd else ""
+    if token in allowed:
         try:
             return subprocess.getoutput(cmd)
         except Exception as e:
             return f"Shell error: {str(e)}"
     return "Command not allowed"
 
+def summarize_file_tool(filename: str) -> str:
+    """Lis un fichier et demande au LLM d’en produire un résumé clair."""
+    try:
+        filename = _strip_quotes(filename)
+        content = read_file(filename)
+        if content.startswith("File not found:"):
+            return content
+        if not content.strip():
+            return f"File is empty: {filename}"
+        prompt = (
+            "Tu es un assistant qui résume de façon claire et structurée.\n"
+            "Donne 3 à 6 puces avec l’essentiel, puis un court TL;DR.\n\n"
+            f"Texte à résumer:\n{content}\n"
+        )
+        return llm.invoke(prompt)
+    except Exception as e:
+        return f"Summary error: {str(e)}"
+
+def question_on_file_tool(input_str: str) -> str:
+    """
+    Poser une question sur un fichier.
+    Format attendu : 'fichier.txt | ma question'
+    (tolère espaces et quotes/autour)
+    """
+    try:
+        if not input_str or "|" not in input_str:
+            return "Format invalide. Utilise: 'fichier.txt | question'"
+        left, right = input_str.split("|", 1)
+        filename = _strip_quotes(left.strip())
+        question = (right or "").strip()
+
+        content = read_file(filename)
+        if content.startswith("File not found:"):
+            return content
+        if not content.strip():
+            return f"File is empty: {filename}"
+
+        prompt = (
+            f"Voici le contenu d'un fichier :\n{content}\n\n"
+            f"En te basant uniquement sur ce texte, réponds clairement à la question : {question}"
+        )
+        return llm.invoke(prompt)
+    except Exception as e:
+        return f"Question error: {str(e)}"
+
+# ===================================================
+# ================ DÉCLARATION DES TOOLS ============
+# ===================================================
+
 tools = [
-    Tool(name="Python", func=PythonREPLTool().run, description="Execute Python code."),
-    Tool(name="Shell", func=shell_tool, description="Run safe shell commands."),
-    Tool(name="FileExploitation", func=file_exploit_tool, description="List, read, or write files in a safe directory. Usage: 'list', 'read filename', 'write filename content'"),
-    Tool(
-        name="SummarizeFile",
-        func=summarize_file_tool,
-        description="Résume le contenu d’un fichier. Usage: fournir seulement le nom du fichier"
-    ),
-    Tool(
-        name="QuestionOnFile",
-        func=question_on_file_tool,
-        description="Poser une question sur un fichier. Usage: 'fichier.txt | ma question'"
-    )
+    Tool(name="Python", func=PythonREPLTool().run,
+         description="Exécute du code Python."),
+    Tool(name="Shell", func=shell_tool,
+         description="Exécute des commandes shell sécurisées (ls/pwd/whoami)."),
+    Tool(name="FileExploitation", func=file_exploit_tool,
+         description="Lister/lire/écrire dans le répertoire sécurisé. Syntaxe: 'list' | 'read <fichier>' | 'write <fichier> <contenu>'"),
+    Tool(name="SummarizeFile", func=summarize_file_tool,
+         description="Résume le contenu d’un fichier (donne uniquement le nom du fichier)."),
+    Tool(name="QuestionOnFile", func=question_on_file_tool,
+         description="Question sur un fichier. Format: 'fichier.txt | ma question'"),
 ]
 
+# ===================================================
+# ================== AGENT & ENDPOINT ===============
+# ===================================================
+
 agent = initialize_agent(
-            tools,
-            llm,
-            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            verbose=True, handle_parsing_errors=True,
-            max_iterations=10,  # Limit iterations to prevent infinite loops
-            max_execution_time=30  # Limit execution time to 30 seconds   
-        )
+    tools, llm,
+    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    verbose=True, handle_parsing_errors=True,
+    max_iterations=10, max_execution_time=30
+)
 
 class Prompt(BaseModel):
     prompt: str
@@ -160,7 +210,7 @@ class Prompt(BaseModel):
 @app.post("/ask")
 def ask_user(prompt: Prompt):
     try:
-        response = agent.invoke(prompt.prompt)
-        return {"response": response}
+        res = agent.invoke(prompt.prompt)
+        return {"response": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")

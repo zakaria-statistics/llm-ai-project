@@ -5,6 +5,3 @@ langchain-experimental
 langchain-community
 langchain-core
 pydantic
-transformers
-torch
-sentencepiece

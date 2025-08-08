@@ -1,7 +1,6 @@
-fastapi==0.110.0
-uvicorn==0.29.0
-pydantic==2.6.4
-
-langchain==0.1.17
-langchain-experimental==0.0.21
-langchain-community==0.0.57
+fastapi
+uvicorn
+langchain
+langchain-experimental
+langchain-community
+pydantic

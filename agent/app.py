@@ -6,6 +6,10 @@ from langchain.agents import initialize_agent, Tool
 from langchain_community.llms import Ollama
 from langchain_experimental.tools import PythonREPLTool
 from langchain.agents.agent_types import AgentType
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.chains.summarize import load_summarize_chain
+from langchain.prompts import PromptTemplate
+from langchain.docstore import Document
 import subprocess, os, re
 
 # ===================================================
@@ -132,22 +136,46 @@ def shell_tool(cmd: str) -> str:
     return "Command not allowed"
 
 def summarize_file_tool(filename: str) -> str:
-    """Lis un fichier et demande au LLM d’en produire un résumé clair."""
+    """Lis un fichier et demande au LLM un résumé concis (puces + TL;DR), avec découpage."""
     try:
         filename = _strip_quotes(filename)
-        content = read_file(filename)
-        if content.startswith("File not found:"):
-            return content
-        if not content.strip():
+        path = _safe_join(filename)
+        if not os.path.exists(path):
+            return f"File not found: {filename}"
+
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        if not content:
             return f"File is empty: {filename}"
-        prompt = (
-            "Tu es un assistant qui résume de façon claire et structurée.\n"
-            "Donne 3 à 6 puces avec l’essentiel, puis un court TL;DR.\n\n"
-            f"Texte à résumer:\n{content}\n"
+
+        # Découpage pour éviter l’écho du texte complet
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
+        chunks = splitter.split_text(content)
+        docs = [Document(page_content=c) for c in chunks]
+
+        map_prompt = PromptTemplate.from_template(
+            "Tu es concis. Résume ce passage en 3–5 puces sans copier-coller :\n\n{text}\n\n-"
         )
-        return llm.invoke(prompt)
+        combine_prompt = PromptTemplate.from_template(
+            "Combine ces résumés en 5–7 puces claires (sans redite), puis ajoute un TL;DR d'une phrase.\n\n{text}\n\nRésumé final :"
+        )
+
+        chain = load_summarize_chain(
+            llm,
+            chain_type="map_reduce",
+            map_prompt=map_prompt,
+            combine_prompt=combine_prompt,
+            return_intermediate_steps=False,
+            verbose=False,
+        )
+        result = chain.run(docs)
+        return result.strip()
+
+    except PermissionError as pe:
+        return str(pe)
     except Exception as e:
         return f"Summary error: {str(e)}"
+
 
 def question_on_file_tool(input_str: str) -> str:
     """
@@ -207,10 +235,22 @@ agent = initialize_agent(
 class Prompt(BaseModel):
     prompt: str
 
+def _normalize_agent_result(res) -> str:
+    """Retourne toujours une string lisible depuis AgentExecutor."""
+    if isinstance(res, dict):
+        # cas le plus courant : {'input': ..., 'output': ...}
+        if "output" in res and isinstance(res["output"], str):
+            return res["output"]
+        if "text" in res and isinstance(res["text"], str):
+            return res["text"]
+        return str(res)
+    return str(res)
+
+
 @app.post("/ask")
 def ask_user(prompt: Prompt):
     try:
         res = agent.invoke(prompt.prompt)
-        return {"response": res}
+        return {"response": _normalize_agent_result(res)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")

@@ -148,16 +148,45 @@ def summarize_file_tool(filename: str) -> str:
         if not content:
             return f"File is empty: {filename}"
 
-        # Découpage pour éviter l’écho du texte complet
+        # If content is short enough, summarize directly without chunking
+        if len(content) < 3000:
+            direct_prompt = f"""Please provide a concise summary of this text in bullet points (3-5 points) followed by a one-sentence TL;DR.
+
+Text to summarize:
+{content}
+
+Summary:
+-"""
+            try:
+                result = llm.invoke(direct_prompt)
+                return result.strip()
+            except Exception as e:
+                return f"Direct summary error: {str(e)}"
+
+        # For longer content, use map-reduce approach
         splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
         chunks = splitter.split_text(content)
         docs = [Document(page_content=c) for c in chunks]
 
+        # Improved prompts with clearer instructions
         map_prompt = PromptTemplate.from_template(
-            "Tu es concis. Résume ce passage en 3–5 puces sans copier-coller :\n\n{text}\n\n-"
+            """You are a helpful AI assistant. Please summarize the following text passage in 3-5 bullet points. Do not copy-paste, but provide a concise summary of the key points.
+
+Text passage:
+{text}
+
+Summary:
+-"""
         )
+        
         combine_prompt = PromptTemplate.from_template(
-            "Combine ces résumés en 5–7 puces claires (sans redite), puis ajoute un TL;DR d'une phrase.\n\n{text}\n\nRésumé final :"
+            """You are a helpful AI assistant. Please combine these individual summaries into a final comprehensive summary with 5-7 clear bullet points (avoid repetition), followed by a one-sentence TL;DR.
+
+Individual summaries:
+{text}
+
+Final Summary:
+-"""
         )
 
         chain = load_summarize_chain(
@@ -175,7 +204,6 @@ def summarize_file_tool(filename: str) -> str:
         return str(pe)
     except Exception as e:
         return f"Summary error: {str(e)}"
-
 
 def question_on_file_tool(input_str: str) -> str:
     """

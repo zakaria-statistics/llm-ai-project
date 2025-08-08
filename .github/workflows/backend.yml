@@ -25,6 +25,9 @@ jobs:
       - name: Save Docker image as tar
         run: docker save agent-backend:1.0.0 -o backend.tar
 
+      - name: chow tar file size
+        run: ls -lh backend.tar
+
       - name: Set permissions for backend.tar
         run: chmod 644 $GITHUB_WORKSPACE/backend.tar
 

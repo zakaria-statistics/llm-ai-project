@@ -9,7 +9,7 @@ from langchain.agents.agent_types import AgentType
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import PromptTemplate
-from langchain.docstore import Document
+from langchain.docstore.document import Document
 import subprocess, os, re
 
 # ===================================================

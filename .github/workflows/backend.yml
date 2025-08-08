@@ -28,6 +28,9 @@ jobs:
       - name: Set permissions for backend.tar
         run: chmod 644 $GITHUB_WORKSPACE/backend.tar
 
+      - name: Compress Docker image tarball
+        run: gzip -c backend.tar > backend.tar.gz
+
       - name: Copy image to VM
         uses: appleboy/scp-action@v0.1.6
         with:
@@ -35,8 +38,8 @@ jobs:
           port: 2222
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          source: backend.tar
-          target: ~/backend.tar
+          source: backend.tar.gz
+          target: ~/backend.tar.gz
 
       - name: Load image and deploy via SSH
         uses: appleboy/ssh-action@v0.1.6
@@ -46,6 +49,7 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            docker load -i ~/backend.tar/backend.tar
+            gunzip -f ~/backend.tar.gz
+            docker load -i ~/backend.tar
             cd ~/llm-ai-project/simple-ai-agent
             docker compose up -d --no-deps --build agent

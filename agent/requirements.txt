@@ -2,5 +2,5 @@ fastapi
 uvicorn
 langchain
 langchain-experimental
-langchain-community
+langchain_community
 pydantic

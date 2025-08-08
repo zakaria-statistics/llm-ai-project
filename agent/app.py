@@ -18,7 +18,7 @@ import subprocess, os, re
 
 app = FastAPI()
 
-# CORS (ouvre à tout pour dev; restreindre en prod)
+# CORS (open to all for dev; restrict in prod)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,16 +28,16 @@ app.add_middleware(
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 llm = Ollama(model="mistral", base_url=OLLAMA_BASE_URL)
 
-# Dossier fichiers sécurisé (montre-le en volume: ./files:/app/files)
+# Secure files directory (mount as volume: ./files:/app/files)
 SAFE_DIR = "./files"
 os.makedirs(SAFE_DIR, exist_ok=True)
 
 # ===================================================
-# ================== HELPERS GÉNÉRIQUES =============
+# ================== GENERIC HELPERS ================
 # ===================================================
 
 def _strip_quotes(s: str) -> str:
-    """Nettoie quotes/backticks et espaces superflus autour d'un arg."""
+    """Removes quotes/backticks and extra spaces around an argument."""
     if not isinstance(s, str):
         return s
     s = s.strip()
@@ -48,8 +48,8 @@ def _strip_quotes(s: str) -> str:
     return s.strip(" '\"`")
 
 def _safe_join(filename: str) -> str:
-    """Construit un chemin sûr, strictement sous SAFE_DIR."""
-    filename = _strip_quotes(filename)  # <- nettoyage de base
+    """Builds a safe path strictly under SAFE_DIR."""
+    filename = _strip_quotes(filename)
     path = os.path.abspath(os.path.join(SAFE_DIR, filename))
     safe_root = os.path.abspath(SAFE_DIR)
     if os.path.commonpath([path, safe_root]) != safe_root:
@@ -57,7 +57,7 @@ def _safe_join(filename: str) -> str:
     return path
 
 # ===================================================
-# ================== MODULE FILE OPS =================
+# ================== FILE OPS MODULE ================
 # ===================================================
 
 def list_files() -> str:
@@ -77,7 +77,7 @@ def write_file(filename: str, content: str = "") -> str:
         f.write(content or "")
     return f"Written to {filename}"
 
-# API “bas niveau” pour l’agent (list/read/write via une seule commande)
+# Low-level API for agent (list/read/write via a single command)
 def file_tool(action: str, filename: str = "", content: str = "") -> str:
     try:
         action = (action or "").strip().lower()
@@ -100,17 +100,17 @@ def file_tool(action: str, filename: str = "", content: str = "") -> str:
 
 def file_exploit_tool(user_input: str) -> str:
     """
-    Parse robuste d'une commande en une ligne :
+    Robustly parses a one-line command:
       - list
       - read filename.txt
-      - write filename.txt contenu...
-    Tolère quotes/backticks et espaces multiples.
+      - write filename.txt content...
+    Tolerates quotes/backticks and multiple spaces.
     """
     if not user_input or not user_input.strip():
         return "No input provided."
 
     cleaned = _strip_quotes(user_input.strip())
-    parts = re.split(r"\s+", cleaned, maxsplit=2)  # split sur espaces multiples
+    parts = re.split(r"\s+", cleaned, maxsplit=2)
     if not parts:
         return "No input provided."
 
@@ -121,11 +121,11 @@ def file_exploit_tool(user_input: str) -> str:
     return file_tool(action, filename, content)
 
 # ===================================================
-# =================== OUTILS “IA” ====================
+# =================== AI TOOLS ======================
 # ===================================================
 
 def shell_tool(cmd: str) -> str:
-    """Shell restreint aux commandes autorisées."""
+    """Restricted shell for allowed commands only."""
     allowed = {"ls", "pwd", "whoami"}
     token = (cmd or "").strip().split()[0] if cmd else ""
     if token in allowed:
@@ -136,7 +136,7 @@ def shell_tool(cmd: str) -> str:
     return "Command not allowed"
 
 def summarize_file_tool(filename: str) -> str:
-    """Lis un fichier et demande au LLM un résumé concis (puces + TL;DR), avec découpage."""
+    """Reads a file and asks the LLM for a concise summary (bullets + TL;DR), with chunking."""
     try:
         filename = _strip_quotes(filename)
         path = _safe_join(filename)
@@ -148,16 +148,45 @@ def summarize_file_tool(filename: str) -> str:
         if not content:
             return f"File is empty: {filename}"
 
-        # Découpage pour éviter l’écho du texte complet
+        # If content is short enough, summarize directly without chunking
+        if len(content) < 3000:
+            direct_prompt = f"""Please provide a concise summary of this text in bullet points (3-5 points) followed by a one-sentence TL;DR.
+
+Text to summarize:
+{content}
+
+Summary:
+-"""
+            try:
+                result = llm.invoke(direct_prompt)
+                return result.strip()
+            except Exception as e:
+                return f"Direct summary error: {str(e)}"
+
+        # For longer content, use map-reduce approach
         splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
         chunks = splitter.split_text(content)
         docs = [Document(page_content=c) for c in chunks]
 
+        # Improved prompts with clearer instructions
         map_prompt = PromptTemplate.from_template(
-            "Tu es concis. Résume ce passage en 3–5 puces sans copier-coller :\n\n{text}\n\n-"
+            """You are a helpful AI assistant. Please summarize the following text passage in 3-5 bullet points. Do not copy-paste, but provide a concise summary of the key points.
+
+Text passage:
+{text}
+
+Summary:
+-"""
         )
+        
         combine_prompt = PromptTemplate.from_template(
-            "Combine ces résumés en 5–7 puces claires (sans redite), puis ajoute un TL;DR d'une phrase.\n\n{text}\n\nRésumé final :"
+            """You are a helpful AI assistant. Please combine these individual summaries into a final comprehensive summary with 5-7 clear bullet points (avoid repetition), followed by a one-sentence TL;DR.
+
+Individual summaries:
+{text}
+
+Final Summary:
+-"""
         )
 
         chain = load_summarize_chain(
@@ -176,16 +205,15 @@ def summarize_file_tool(filename: str) -> str:
     except Exception as e:
         return f"Summary error: {str(e)}"
 
-
 def question_on_file_tool(input_str: str) -> str:
     """
-    Poser une question sur un fichier.
-    Format attendu : 'fichier.txt | ma question'
-    (tolère espaces et quotes/autour)
+    Ask a question about a file.
+    Expected format: 'filename.txt | my question'
+    (tolerates spaces and quotes around)
     """
     try:
         if not input_str or "|" not in input_str:
-            return "Format invalide. Utilise: 'fichier.txt | question'"
+            return "Invalid format. Use: 'filename.txt | question'"
         left, right = input_str.split("|", 1)
         filename = _strip_quotes(left.strip())
         question = (right or "").strip()
@@ -197,28 +225,28 @@ def question_on_file_tool(input_str: str) -> str:
             return f"File is empty: {filename}"
 
         prompt = (
-            f"Voici le contenu d'un fichier :\n{content}\n\n"
-            f"En te basant uniquement sur ce texte, réponds clairement à la question : {question}"
+            f"Here is the content of a file:\n{content}\n\n"
+            f"Based only on this text, answer clearly the question: {question}"
         )
         return llm.invoke(prompt)
     except Exception as e:
         return f"Question error: {str(e)}"
 
 # ===================================================
-# ================ DÉCLARATION DES TOOLS ============
+# ================ TOOLS DECLARATION ================
 # ===================================================
 
 tools = [
     Tool(name="Python", func=PythonREPLTool().run,
-         description="Exécute du code Python."),
+         description="Executes Python code."),
     Tool(name="Shell", func=shell_tool,
-         description="Exécute des commandes shell sécurisées (ls/pwd/whoami)."),
+         description="Executes secure shell commands (ls/pwd/whoami)."),
     Tool(name="FileExploitation", func=file_exploit_tool,
-         description="Lister/lire/écrire dans le répertoire sécurisé. Syntaxe: 'list' | 'read <fichier>' | 'write <fichier> <contenu>'"),
+         description="List/read/write in the secure directory. Syntax: 'list' | 'read <file>' | 'write <file> <content>'"),
     Tool(name="SummarizeFile", func=summarize_file_tool,
-         description="Résume le contenu d’un fichier (donne uniquement le nom du fichier)."),
+         description="Simple file summarizer (give only the file name)."),
     Tool(name="QuestionOnFile", func=question_on_file_tool,
-         description="Question sur un fichier. Format: 'fichier.txt | ma question'"),
+         description="Ask a question about a file. Format: 'filename.txt | my question'"),
 ]
 
 # ===================================================
@@ -236,9 +264,9 @@ class Prompt(BaseModel):
     prompt: str
 
 def _normalize_agent_result(res) -> str:
-    """Retourne toujours une string lisible depuis AgentExecutor."""
+    """Always returns a readable string from AgentExecutor."""
     if isinstance(res, dict):
-        # cas le plus courant : {'input': ..., 'output': ...}
+        # most common case: {'input': ..., 'output': ...}
         if "output" in res and isinstance(res["output"], str):
             return res["output"]
         if "text" in res and isinstance(res["text"], str):

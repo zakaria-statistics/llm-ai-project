@@ -11,6 +11,10 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import PromptTemplate
 from langchain_core.documents import Document
 import subprocess, os, re
+from fastapi.responses import StreamingResponse
+import asyncio
+from langchain.callbacks.streaming_aiter import AsyncIteratorCallbackHandler
+from copy import deepcopy
 
 # ===================================================
 # ================ APP & LLM CONFIG =================
@@ -282,3 +286,56 @@ def ask_user(prompt: Prompt):
         return {"response": _normalize_agent_result(res)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+# ===================================================
+# ================== Streaming response ===============
+# ===================================================
+
+@app.post("/ask_stream")
+async def ask_stream(prompt: Prompt):
+    """
+    Stream the model's tokens as the are generated.
+    For now, we stream the *LLM text* (including agent thought tokens if it decides to think out loud).
+    """
+
+    # Create a streaming callback
+    cb = AsyncIteratorCallbackHandler()
+
+    # Clone LLM with streaming enabled and attach callback
+    streaming_llm = deepcopy(llm)
+    # langchain_community.llms.Ollama accepts: streaming=True, callbacks=[...]
+    streaming_llm.streaming = True
+    streaming_llm.callbacks = [cb]
+
+    # Build a fresh agent using the same tools but the streaming LLM
+    streaming_agent = initialize_agent(
+        tools,
+        streaming_llm,
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        verbose=True,
+        handle_parsing_errors=True,
+        max_iterations=10,
+        max_execution_time=30,
+    )
+
+    async def run_agent():
+        try:
+            # Use ainvoke to avoid blocking the event loop
+            await streaming_agent.ainvoke(prompt.prompt)
+        except Exception as e:
+            # Surface the error to the stream
+            await cb.on_llm_error(e)
+        finally:
+            await cb.aiter_end() # Signal end of stream
+    
+    async def token_generator():
+
+        # Start the agent in background
+        task = asyncio.create_task(run_agent())
+        # Yield tokens as they arrive
+        async for token in cb.aiter():
+                # You can wrap as SSE if you prefer; here we just stream plain text
+                yield token
+        await task
+
+    return StreamingResponse(token_generator(), media_type="text/plain; charset=utf-8")

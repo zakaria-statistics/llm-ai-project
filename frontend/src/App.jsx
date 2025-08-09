@@ -29,6 +29,38 @@ function App() {
     }
   };
 
+  const askAgentStream = async () => {
+    setLoading(true);
+    setError('');
+    setResponse('');
+    try {
+      const res = await fetch("http://196.115.125.145:8000/ask_stream", {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      if (!res.ok || !res.body) {
+        const errTxt = await res.text();
+        throw new Error(errTxt || "Stream failed");
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          setResponse(prev => prev + chunk);
+        }
+      }
+    } catch (err){
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div style={{ padding: 20 }}>
       <h2>🧠 Local AI Agent</h2>

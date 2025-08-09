@@ -74,6 +74,9 @@ function App() {
       <button onClick={askAgent} disabled={loading || !prompt.trim()}>
         {loading ? "Loading..." : "Ask"}
       </button>
+      <button onClick={askAgentStream} disabled={loading || !prompt.trim()} style={{ marginLeft: 8 }}>
+        {loading ? "Streaming..." : "Ask (stream)"}
+      </button>
       {loading && <div>⏳ Waiting for response...</div>}
       {error && <div style={{ color: 'red' }}>Error: {error}</div>}
       <p><strong>Response:</strong> {typeof response === "string" ? response : JSON.stringify(response)}</p>

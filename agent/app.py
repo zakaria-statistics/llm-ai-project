@@ -14,7 +14,8 @@ import subprocess, os, re
 from fastapi.responses import StreamingResponse
 import asyncio
 from langchain.callbacks.streaming_aiter import AsyncIteratorCallbackHandler
-from copy import deepcopy
+from langchain.callbacks.base import CallbackManager
+
 
 # ===================================================
 # ================ APP & LLM CONFIG =================
@@ -301,16 +302,11 @@ async def ask_stream(prompt: Prompt):
     # Create a streaming callback
     cb = AsyncIteratorCallbackHandler()
 
-    # Clone LLM with streaming enabled and attach callback
-    streaming_llm = deepcopy(llm)
-    # langchain_community.llms.Ollama accepts: streaming=True, callbacks=[...]
-    streaming_llm.streaming = True
-    streaming_llm.callbacks = [cb]
 
     # Build a fresh agent using the same tools but the streaming LLM
     streaming_agent = initialize_agent(
         tools,
-        streaming_llm,
+        llm,
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         verbose=True,
         handle_parsing_errors=True,
@@ -321,7 +317,7 @@ async def ask_stream(prompt: Prompt):
     async def run_agent():
         try:
             # Use ainvoke to avoid blocking the event loop
-            await streaming_agent.ainvoke(prompt.prompt)
+            await streaming_agent.ainvoke(prompt.prompt, callbacks=[cb])
         except Exception as e:
             # Surface the error to the stream
             await cb.on_llm_error(e)

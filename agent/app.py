@@ -257,7 +257,7 @@ agent = initialize_agent(
     tools, llm,
     agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     verbose=True, handle_parsing_errors=True,
-    max_iterations=10, max_execution_time=30
+    max_iterations=10, max_execution_time=30,
 )
 
 class Prompt(BaseModel):

@@ -13,8 +13,7 @@ from langchain_core.documents import Document
 import subprocess, os, re
 from fastapi.responses import StreamingResponse
 import asyncio
-from langchain.callbacks.streaming_aiter import AsyncIteratorCallbackHandler
-
+from typing import AsyncGenerator
 
 # ===================================================
 # ================ APP & LLM CONFIG =================
@@ -288,11 +287,77 @@ def ask_user(prompt: Prompt):
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
 
 # ===================================================
-# ================== Streaming response ===============
+# ================== STREAMING RESPONSE =============
 # ===================================================
 
 @app.post("/ask_stream")
 async def ask_stream(prompt: Prompt):
+    """
+    Stream the response from the AI agent using Server-Sent Events (SSE).
+    """
+    
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            # For streaming with Ollama, we need to create a streaming LLM instance
+            streaming_llm = Ollama(
+                model="mistral", 
+                base_url=OLLAMA_BASE_URL,
+                callbacks=[]  # We'll handle streaming manually
+            )
+            
+            # Create a streaming agent
+            streaming_agent = initialize_agent(
+                tools,
+                streaming_llm,
+                agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                verbose=True,
+                handle_parsing_errors=True,
+                max_iterations=10,
+                max_execution_time=30,
+            )
+            
+            # Send initial status
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Processing your request...'})}\n\n"
+            
+            # Execute the agent
+            result = await streaming_agent.ainvoke(prompt.prompt)
+            
+            # Normalize and send the final result
+            final_response = _normalize_agent_result(result)
+            
+            # Split response into chunks for streaming effect
+            words = final_response.split()
+            current_chunk = ""
+            
+            for i, word in enumerate(words):
+                current_chunk += word + " "
+                
+                # Send chunk every 3-5 words or at the end
+                if (i + 1) % 4 == 0 or i == len(words) - 1:
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': current_chunk.strip()})}\n\n"
+                    current_chunk = ""
+                    await asyncio.sleep(0.05)  # Small delay for streaming effect
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'type': 'complete', 'content': final_response})}\n\n"
+            
+        except Exception as e:
+            error_msg = f"Streaming error: {str(e)}"
+            yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
+        
+        finally:
+            yield "data: [DONE]\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
     """
     Stream the model's tokens as the are generated.
     For now, we stream the *LLM text* (including agent thought tokens if it decides to think out loud).

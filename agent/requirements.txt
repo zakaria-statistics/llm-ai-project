@@ -4,4 +4,5 @@ langchain
 langchain-experimental
 langchain-community
 langchain-core
+langchain-text-splitters
 pydantic

@@ -14,7 +14,6 @@ import subprocess, os, re
 from fastapi.responses import StreamingResponse
 import asyncio
 from langchain.callbacks.streaming_aiter import AsyncIteratorCallbackHandler
-from langchain.callbacks.base import CallbackManager
 
 
 # ===================================================

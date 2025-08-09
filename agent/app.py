@@ -319,9 +319,12 @@ async def ask_stream(prompt: Prompt):
             await streaming_agent.ainvoke(prompt.prompt, callbacks=[cb])
         except Exception as e:
             # Surface the error to the stream
-            await cb.on_llm_error(e)
+            try:
+                await cb.on_llm_error(e)
+            except TypeError:
+                cb.on_llm_error(e)
         finally:
-            await cb.aiter_end() # Signal end of stream
+            await cb.done() # Signal end of stream
     
     async def token_generator():
 

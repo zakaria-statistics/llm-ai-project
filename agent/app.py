@@ -11,6 +11,8 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import PromptTemplate
 from langchain_core.documents import Document
 import subprocess, os, re
+from typing import Iterator
+
 
 # ===================================================
 # ================ APP & LLM CONFIG =================
@@ -282,3 +284,27 @@ def ask_user(prompt: Prompt):
         return {"response": _normalize_agent_result(res)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
+# ===================================================
+# ================ STREAMING ENDPOINT ===============
+# ===================================================
+
+def _stream_llm(prompt_text: str) -> Iterator[bytes]:
+    """
+    Streams raw tokens from the local Ollama model.
+    This is fast and reliable; it does not run the agent/tools.
+    """
+    try:
+        for chunk in llm.stream(prompt_text):
+            # 'chunk' is a string fragment; flush as bytes
+            yield chunk.encode("utf-8")
+    except Exception as e:
+        # Emit the error in-stream so the client sees something useful
+        yield f"\n[STREAM ERROR] {str(e)}".encode("utf-8")
+
+@app.post("/ask_stream")
+def ask_user_stream(prompt: Prompt):
+    if not prompt.prompt or not prompt.prompt.strip():
+        raise HTTPException(status_code=400, detail="Empty prompt.")
+    return StreamingResponse(_stream_llm(prompt.prompt), media_type="text/plain")
